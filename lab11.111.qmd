@@ -1,0 +1,133 @@
+---
+title: "lab11"
+format: html
+editor: visual
+---
+
+## Data Preprocess
+
+```{python}
+# preprocess.py
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+import pickle
+
+# Load dataset
+df = pd.read_csv('lab_11_bridge_data.csv')
+
+# Drop Bridge_ID
+df = df.drop(columns=['Bridge_ID'])
+
+# Define features and target
+X = df.drop('Max_Load_Tons', axis=1)
+y = df['Max_Load_Tons']
+
+# Define column types
+num_features = ['Span_ft', 'Deck_Width_ft', 'Age_Years', 'Num_Lanes', 'Condition_Rating']
+cat_features = ['Material']
+
+# Preprocessing pipeline
+numeric_transformer = Pipeline(steps=[
+    ('scaler', StandardScaler())
+])
+
+categorical_transformer = Pipeline(steps=[
+    ('encoder', OneHotEncoder(drop='first'))
+])
+
+preprocessor = ColumnTransformer(
+    transformers=[
+        ('num', numeric_transformer, num_features),
+        ('cat', categorical_transformer, cat_features)
+    ]
+)
+
+# Fit and transform
+X_processed = preprocessor.fit_transform(X)
+
+# Save pipeline
+with open('preprocessing_pipeline.pkl', 'wb') as f:
+    pickle.dump(preprocessor, f)
+
+# Train-test split
+X_train, X_test, y_train, y_test = train_test_split(X_processed, y, test_size=0.2, random_state=42)
+
+# Save train/test sets
+import numpy as np
+np.savez('bridge_train_test_data.npz', X_train=X_train, X_test=X_test, y_train=y_train, y_test=y_test)
+
+```
+
+## Model Training
+
+```{python}
+# train_model_pytorch.py
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import matplotlib.pyplot as plt
+from torch.utils.data import TensorDataset, DataLoader, random_split
+
+# Load data
+data = np.load('bridge_train_test_data.npz')
+X_train, X_test = data['X_train'], data['X_test']
+y_train, y_test = data['y_train'], data['y_test']
+
+# Convert to PyTorch tensors
+X_train = torch.tensor(X_train, dtype=torch.float32)
+y_train = torch.tensor(y_train, dtype=torch.float32).view(-1, 1)
+X_test = torch.tensor(X_test, dtype=torch.float32)
+y_test = torch.tensor(y_test, dtype=torch.float32).view(-1, 1)
+
+# Dataset and Dataloader
+dataset = TensorDataset(X_train, y_train)
+val_size = int(0.2 * len(dataset))
+train_size = len(dataset) - val_size
+train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+
+train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True)
+val_loader = DataLoader(val_dataset, batch_size=16)
+
+# Define model
+class BridgeANN(nn.Module):
+    def __init__(self, input_size):
+        super().__init__()
+        self.model = nn.Sequential(
+            nn.Linear(input_size, 64),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(64, 32),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(32, 1)
+        )
+
+    def forward(self, x):
+        return self.model(x)
+
+model = BridgeANN(input_size=X_train.shape[1])
+
+# Loss and optimizer with L2 regularization
+criterion = nn.MSELoss()
+optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=0.01)  # weight_decay = L2 reg
+
+# Training with early stopping
+train_losses, val_losses = [], []
+best_val_loss = float('inf')
+patience, trigger_times = 10, 0
+
+for epoch in range(100):
+    model.train()
+    batch_losses = []
+    for xb, yb in train_loader:
+        optimizer.zero_grad()
+        pred = model(xb)
+        loss = criterion(pred, yb)
+        loss.backward()
+        optimizer.step
+
+```
